@@ -29,11 +29,10 @@ const createCard = async (req, res) => {
   }
 };
 
-// @desc    Update card (Move to new list, reorder, change text)
+// @desc    Update card (Move, Rename, Description, Due Date)
 // @route   PUT /api/cards/:id
 const updateCard = async (req, res) => {
   const { id } = req.params;
-  // listId is sent when moving card to a different column
   const { title, description, order, listId, dueDate, assigneeId } = req.body;
 
   try {
@@ -43,7 +42,7 @@ const updateCard = async (req, res) => {
         title,
         description,
         order,
-        listId, // This allows moving cards between lists!
+        listId,
         dueDate,
         assigneeId
       }
@@ -55,12 +54,72 @@ const updateCard = async (req, res) => {
   }
 };
 
-// @desc    Delete card
+// @desc    Get Single Card Details (for Modal)
+// @route   GET /api/cards/:id
+const getCard = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const card = await prisma.card.findUnique({
+      where: { id },
+      include: {
+        comments: {
+          include: { user: { select: { name: true, id: true } } },
+          orderBy: { createdAt: 'desc' }
+        }
+      }
+    });
+    res.json(card);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Add Comment to Card
+// @route   POST /api/cards/:id/comments
+const addComment = async (req, res) => {
+  const { id } = req.params; // Card ID
+  const { text } = req.body;
+
+  try {
+    const comment = await prisma.comment.create({
+      data: {
+        text,
+        cardId: id,
+        userId: req.user.id
+      },
+      include: { user: { select: { name: true } } }
+    });
+    res.status(201).json(comment);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Delete card (Admin Only)
 // @route   DELETE /api/cards/:id
 const deleteCard = async (req, res) => {
   const { id } = req.params;
 
   try {
+    // We need to find the workspace ID to check permissions
+    const card = await prisma.card.findUnique({
+      where: { id },
+      include: { list: { include: { board: true } } }
+    });
+
+    if (!card) return res.status(404).json({ message: 'Card not found' });
+
+    const workspaceId = card.list.board.workspaceId;
+
+    // RBAC Check
+    const member = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: req.user.id } }
+    });
+
+    if (!member || member.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Only Admins can delete cards' });
+    }
+
     await prisma.card.delete({ where: { id } });
     res.json({ message: 'Card deleted' });
   } catch (error) {
@@ -68,4 +127,4 @@ const deleteCard = async (req, res) => {
   }
 };
 
-module.exports = { createCard, updateCard, deleteCard };
+module.exports = { createCard, updateCard, deleteCard, getCard, addComment };
