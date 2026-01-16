@@ -37,7 +37,13 @@ const getWorkspaces = async (req, res) => {
         }
       },
       include: {
-        members: true, // Include member details if needed
+        members: {
+          include: {
+            user: {
+              select: { id: true, name: true, email: true }
+            }
+          }
+        }
       }
     });
 
@@ -47,4 +53,50 @@ const getWorkspaces = async (req, res) => {
   }
 };
 
-module.exports = { createWorkspace, getWorkspaces };
+// @desc    Invite a user to the workspace
+// @route   POST /api/workspaces/:id/invite
+const inviteMember = async (req, res) => {
+  const { id } = req.params; // Workspace ID
+  const { email } = req.body;
+
+  try {
+    // 1. Verify Requestor is Admin of this workspace
+    const requestor = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId: id, userId: req.user.id } }
+    });
+
+    if (!requestor || requestor.role !== 'ADMIN') {
+      return res.status(403).json({ message: 'Only Admins can invite members' });
+    }
+
+    // 2. Find User to Invite
+    const userToInvite = await prisma.user.findUnique({ where: { email } });
+    if (!userToInvite) {
+      return res.status(404).json({ message: 'User not found. They must register first.' });
+    }
+
+    // 3. Check if already a member
+    const existingMember = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId: id, userId: userToInvite.id } }
+    });
+
+    if (existingMember) {
+      return res.status(400).json({ message: 'User is already a member' });
+    }
+
+    // 4. Add Member
+    await prisma.workspaceMember.create({
+      data: {
+        workspaceId: id,
+        userId: userToInvite.id,
+        role: 'MEMBER'
+      }
+    });
+
+    res.json({ message: `${userToInvite.name} added to workspace` });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { createWorkspace, getWorkspaces, inviteMember };
