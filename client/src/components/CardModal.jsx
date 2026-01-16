@@ -23,12 +23,21 @@ const CardModal = ({ cardId, onClose, isAdmin, onDeleteSuccess }) => {
   };
 
   const updateCard = async (updates) => {
+    // 1. Optimistic Update (Safe)
+    setCard((prev) => ({ ...prev, ...updates }));
+
     try {
-      // Optimistic update
-      setCard({ ...card, ...updates });
-      await api.put(`/cards/${cardId}`, updates);
+      // 2. Send to Backend
+      // If updating Date, ensure it's in ISO format for Prisma
+      if (updates.dueDate) {
+        // Append time to ensure consistent day handling
+        await api.put(`/cards/${cardId}`, { ...updates, dueDate: new Date(updates.dueDate) });
+      } else {
+        await api.put(`/cards/${cardId}`, updates);
+      }
     } catch (error) {
       console.error("Update failed");
+      // Revert changes if needed (optional)
     }
   };
 
@@ -55,31 +64,29 @@ const CardModal = ({ cardId, onClose, isAdmin, onDeleteSuccess }) => {
     }
   };
 
-  if (!cardId) return null;
+  if (!cardId || loading || !card) return null;
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+      <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-fade-in">
         
         {/* Header */}
         <div className="p-4 border-b flex justify-between items-start bg-gray-50">
-          {loading ? <div className="h-6 w-48 bg-gray-200 animate-pulse rounded"></div> : (
-             <input 
-               type="text" 
-               className="text-xl font-bold bg-transparent border-none focus:ring-2 focus:ring-blue-500 rounded px-1 w-full"
-               value={card.title}
-               onChange={(e) => updateCard({ title: e.target.value })}
-             />
-          )}
+           <input 
+             type="text" 
+             className="text-xl font-bold bg-transparent border-none focus:ring-2 focus:ring-blue-500 rounded px-1 w-full"
+             value={card.title}
+             onChange={(e) => updateCard({ title: e.target.value })}
+           />
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700 p-1">
             <X size={24} />
           </button>
         </div>
 
-        {/* Scrollable Content */}
+        {/* Content */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
           
-          {/* Due Date & Metadata */}
+          {/* Due Date Fix */}
           <div className="grid grid-cols-2 gap-4">
             <div>
                <label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1 mb-1">
@@ -88,8 +95,13 @@ const CardModal = ({ cardId, onClose, isAdmin, onDeleteSuccess }) => {
                <input 
                  type="date" 
                  className="border rounded p-1 text-sm w-full"
-                 value={card?.dueDate ? card.dueDate.split('T')[0] : ''}
-                 onChange={(e) => updateCard({ dueDate: new Date(e.target.value) })}
+                 // Check if it's a string or date object safely
+                 value={
+                    card.dueDate 
+                    ? String(card.dueDate).split('T')[0] 
+                    : ''
+                 }
+                 onChange={(e) => updateCard({ dueDate: e.target.value })} 
                />
             </div>
           </div>
@@ -102,17 +114,15 @@ const CardModal = ({ cardId, onClose, isAdmin, onDeleteSuccess }) => {
             <textarea
               className="w-full border rounded-md p-3 text-sm h-32 focus:ring-2 focus:ring-blue-500 outline-none resize-none bg-gray-50 focus:bg-white transition-colors"
               placeholder="Add a more detailed description..."
-              value={card?.description || ''}
+              value={card.description || ''}
               onChange={(e) => setCard({ ...card, description: e.target.value })}
               onBlur={(e) => updateCard({ description: e.target.value })}
             />
           </div>
 
-          {/* Comments Section */}
+          {/* Comments */}
           <div>
              <h3 className="text-sm font-bold text-gray-700 mb-3">Activity & Comments</h3>
-             
-             {/* Add Comment */}
              <form onSubmit={handleComment} className="flex gap-2 mb-4">
                 <input 
                   className="flex-1 border rounded-md px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
@@ -125,11 +135,10 @@ const CardModal = ({ cardId, onClose, isAdmin, onDeleteSuccess }) => {
                 </button>
              </form>
 
-             {/* Comments List */}
-             <div className="space-y-3">
-               {card?.comments?.map((c) => (
+             <div className="space-y-3 max-h-48 overflow-y-auto">
+               {card.comments?.map((c) => (
                  <div key={c.id} className="flex gap-3 text-sm">
-                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-xs">
+                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700 text-xs shrink-0">
                       {c.user.name.charAt(0)}
                     </div>
                     <div>
@@ -142,7 +151,7 @@ const CardModal = ({ cardId, onClose, isAdmin, onDeleteSuccess }) => {
           </div>
         </div>
 
-        {/* Footer Actions */}
+        {/* Footer */}
         <div className="p-4 border-t bg-gray-50 flex justify-end">
           {isAdmin && (
             <button 
@@ -153,7 +162,6 @@ const CardModal = ({ cardId, onClose, isAdmin, onDeleteSuccess }) => {
             </button>
           )}
         </div>
-
       </div>
     </div>
   );

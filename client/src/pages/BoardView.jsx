@@ -4,7 +4,7 @@ import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import api from '../services/api';
 import { Plus, MoreHorizontal, Trash2 } from 'lucide-react';
 import io from 'socket.io-client'; 
-import CardModal from '../components/CardModal'; // Ensure this component exists from previous steps
+import CardModal from '../components/CardModal';
 
 // Initialize Socket outside component
 const socket = io.connect("http://localhost:5000");
@@ -14,8 +14,8 @@ const BoardView = () => {
   const navigate = useNavigate();
   const [board, setBoard] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false); // Track Admin Role
-  const [selectedCard, setSelectedCard] = useState(null); // Track Modal State
+  const [isAdmin, setIsAdmin] = useState(false); 
+  const [selectedCard, setSelectedCard] = useState(null); 
 
   useEffect(() => {
     fetchBoard();
@@ -41,7 +41,9 @@ const BoardView = () => {
 
     // 3. Listen for creation events
     socket.on("list_added", (newList) => {
-      setBoard(prev => ({ ...prev, lists: [...prev.lists, newList] }));
+      // Ensure cards array exists
+      const safeList = { ...newList, cards: newList.cards || [] };
+      setBoard(prev => ({ ...prev, lists: [...prev.lists, safeList] }));
     });
 
     socket.on("card_added", (newCard) => {
@@ -56,10 +58,19 @@ const BoardView = () => {
       });
     });
 
+    // 4. Listen for list deletion
+    socket.on("list_deleted", (deletedListId) => {
+      setBoard(prev => ({
+        ...prev,
+        lists: prev.lists.filter(list => list.id !== deletedListId)
+      }));
+    });
+
     return () => {
       socket.off("card_moved");
       socket.off("list_added");
       socket.off("card_added");
+      socket.off("list_deleted");
     };
   }, [id]);
 
@@ -67,7 +78,7 @@ const BoardView = () => {
     try {
       const { data } = await api.get(`/boards/${id}`);
       setBoard(data);
-      setIsAdmin(data.role === 'ADMIN'); // Check Role from Backend Response
+      setIsAdmin(data.role === 'ADMIN');
     } catch (error) {
       console.error('Failed to fetch board');
     } finally {
@@ -85,8 +96,25 @@ const BoardView = () => {
     }
   };
 
+  const deleteList = async (listId) => {
+    if (!window.confirm("Delete this list and all its cards?")) return;
+    try {
+      // 1. Optimistic UI Update (Remove locally immediately)
+      const newLists = board.lists.filter(l => l.id !== listId);
+      setBoard({ ...board, lists: newLists });
+
+      // 2. Call API
+      await api.delete(`/lists/${listId}`);
+
+      // 3. Notify other users via Socket
+      socket.emit("delete_list", { boardId: id, listId }); 
+    } catch (error) {
+      alert("Failed to delete list. You might not have permission.");
+      fetchBoard(); // Revert on failure
+    }
+  };
+
   const onCardDeleted = (deletedCardId) => {
-    // Remove card from local state instantly
     const newLists = board.lists.map(list => ({
       ...list,
       cards: list.cards.filter(c => c.id !== deletedCardId)
@@ -159,8 +187,11 @@ const BoardView = () => {
     if (!title) return;
     try {
       const { data } = await api.post('/lists', { boardId: id, title });
-      setBoard(prev => ({ ...prev, lists: [...prev.lists, data] }));
-      socket.emit("add_list", { boardId: id, list: data });
+      
+      const newList = { ...data, cards: [] };
+
+      setBoard(prev => ({ ...prev, lists: [...prev.lists, newList] }));
+      socket.emit("add_list", { boardId: id, list: newList });
     } catch (error) {
       console.error(error);
     }
@@ -194,7 +225,6 @@ const BoardView = () => {
       <header className="bg-black/20 backdrop-blur-md p-4 text-white flex justify-between items-center shadow-md z-10">
         <div className="flex items-center gap-4">
           <h1 className="text-xl font-bold tracking-tight">{board?.title}</h1>
-          {/* RBAC: Only Admin sees Delete Button */}
           {isAdmin && (
             <button 
               onClick={deleteBoard}
@@ -219,9 +249,23 @@ const BoardView = () => {
             {/* Render Lists */}
             {board?.lists.map((list) => (
               <div key={list.id} className="w-72 flex-shrink-0 bg-gray-100 rounded-xl shadow-lg max-h-full flex flex-col border border-gray-200/50">
-                <div className="p-3 font-semibold text-gray-700 flex justify-between items-center">
+                
+                {/* LIST HEADER */}
+                <div className="p-3 font-semibold text-gray-700 flex justify-between items-center group">
                   <span className="truncate">{list.title}</span>
-                  <MoreHorizontal size={16} className="cursor-pointer text-gray-400 hover:text-gray-700" />
+                  
+                  {/* RBAC: Delete List Button (Visible on Hover for Admins) */}
+                  {isAdmin ? (
+                    <button 
+                      onClick={() => deleteList(list.id)}
+                      className="text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-1"
+                      title="Delete List"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  ) : (
+                    <MoreHorizontal size={16} className="text-gray-400" />
+                  )}
                 </div>
                 
                 {/* Droppable Area */}
@@ -241,17 +285,19 @@ const BoardView = () => {
                               ref={provided.innerRef}
                               {...provided.draggableProps}
                               {...provided.dragHandleProps}
-                              onClick={() => setSelectedCard(card.id)} // CLICK TO OPEN MODAL
+                              onClick={() => setSelectedCard(card.id)} 
                               className={`bg-white p-3 rounded-lg mb-2 shadow-sm text-sm border border-gray-200 group hover:border-blue-400 hover:shadow-md transition-all cursor-pointer relative ${
                                 snapshot.isDragging ? 'shadow-2xl rotate-2 ring-2 ring-blue-500 z-50' : ''
                               }`}
                               style={{ ...provided.draggableProps.style }}
                             >
                               <div className="font-medium text-gray-800">{card.title}</div>
-                              {/* Show small badge if description/date exists (optional polish) */}
                               {(card.description || card.dueDate) && (
                                 <div className="mt-2 flex gap-2">
-                                   {card.description && <div className="h-1.5 w-8 bg-gray-200 rounded-full"/>}
+                                   {card.description && <div className="h-1.5 w-8 bg-gray-200 rounded-full" title="Has description"/>}
+                                   {card.dueDate && (
+                                     <div className="h-1.5 w-1.5 bg-red-300 rounded-full" title="Has due date"/>
+                                   )}
                                 </div>
                               )}
                             </div>

@@ -53,7 +53,6 @@ io.on("connection", (socket) => {
   // Handle Card Movement
   socket.on("move_card", (data) => {
     const { boardId, newList, oldList } = data;
-    // Broadcast to everyone else in the room
     socket.to(boardId).emit("card_moved", { newList, oldList });
   });
 
@@ -65,6 +64,13 @@ io.on("connection", (socket) => {
   // Handle New Card Creation
   socket.on("add_card", (data) => {
     socket.to(data.boardId).emit("card_added", data.card);
+  });
+
+  // --- NEW: Handle List Deletion ---
+  socket.on("delete_list", (data) => {
+    const { boardId, listId } = data;
+    // Broadcast to everyone else in the room
+    socket.to(boardId).emit("list_deleted", listId);
   });
 
   socket.on("disconnect", () => {
@@ -83,7 +89,6 @@ const startServer = async () => {
     await prisma.$connect();
     console.log("✅ Database connected successfully");
     
-    // CHANGE: app.listen -> server.listen
     server.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
     });
