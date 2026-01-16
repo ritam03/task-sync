@@ -1,4 +1,5 @@
 const { PrismaClient } = require('@prisma/client');
+const { logActivity } = require('../utils/logger');
 const prisma = new PrismaClient();
 
 // @desc    Create a new board in a workspace
@@ -8,25 +9,19 @@ const createBoard = async (req, res) => {
 
   try {
     const isMember = await prisma.workspaceMember.findUnique({
-      where: {
-        workspaceId_userId: {
-          workspaceId,
-          userId: req.user.id
-        }
-      }
+      where: { workspaceId_userId: { workspaceId, userId: req.user.id } }
     });
 
     if (!isMember) {
-      return res.status(403).json({ message: 'Not authorized to create boards in this workspace' });
+      return res.status(403).json({ message: 'Not authorized' });
     }
 
     const board = await prisma.board.create({
-      data: {
-        title,
-        workspaceId,
-        bgImage,
-      }
+      data: { title, workspaceId, bgImage }
     });
+
+    // LOG ACTIVITY
+    await logActivity(workspaceId, req.user.id, 'CREATED', 'BOARD', title);
 
     res.status(201).json(board);
   } catch (error) {
@@ -34,17 +29,17 @@ const createBoard = async (req, res) => {
   }
 };
 
-// @desc    Get all boards for a specific workspace
-// @route   GET /api/boards?workspaceId=...
+// @desc    Get all boards
+// @route   GET /api/boards
 const getBoards = async (req, res) => {
   const { workspaceId } = req.query;
 
   try {
-     const isMember = await prisma.workspaceMember.findUnique({
-        where: { workspaceId_userId: { workspaceId, userId: req.user.id } }
-      });
-  
-      if (!isMember) return res.status(403).json({ message: 'Not authorized' });
+    const isMember = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: req.user.id } }
+    });
+
+    if (!isMember) return res.status(403).json({ message: 'Not authorized' });
 
     const boards = await prisma.board.findMany({
       where: { workspaceId },
@@ -57,7 +52,7 @@ const getBoards = async (req, res) => {
   }
 };
 
-// @desc    Get single board with Lists and Cards
+// @desc    Get single board
 // @route   GET /api/boards/:id
 const getBoard = async (req, res) => {
   const { id } = req.params;
@@ -67,26 +62,20 @@ const getBoard = async (req, res) => {
       where: { id },
       include: {
         lists: {
-          orderBy: { order: 'asc' }, 
-          include: {
-            cards: {
-              orderBy: { order: 'asc' }, 
-            }
-          }
+          orderBy: { order: 'asc' },
+          include: { cards: { orderBy: { order: 'asc' } } }
         }
       }
     });
 
     if (!board) return res.status(404).json({ message: 'Board not found' });
 
-    // Check Membership & Return Role
     const member = await prisma.workspaceMember.findUnique({
       where: { workspaceId_userId: { workspaceId: board.workspaceId, userId: req.user.id } }
     });
-    
+
     if (!member) return res.status(403).json({ message: 'Not authorized' });
 
-    // Combine board data with the user's role (ADMIN/MEMBER)
     res.json({ ...board, role: member.role });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -102,7 +91,6 @@ const deleteBoard = async (req, res) => {
     const board = await prisma.board.findUnique({ where: { id } });
     if (!board) return res.status(404).json({ message: 'Board not found' });
 
-    // RBAC: Check if Admin
     const member = await prisma.workspaceMember.findUnique({
       where: { workspaceId_userId: { workspaceId: board.workspaceId, userId: req.user.id } }
     });
@@ -112,6 +100,10 @@ const deleteBoard = async (req, res) => {
     }
 
     await prisma.board.delete({ where: { id } });
+
+    // LOG ACTIVITY
+    await logActivity(board.workspaceId, req.user.id, 'DELETED', 'BOARD', board.title);
+
     res.json({ message: 'Board deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });

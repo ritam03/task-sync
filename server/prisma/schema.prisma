@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -21,8 +18,8 @@ model User {
   ownedWorkspaces Workspace[]      @relation("WorkspaceOwner")
   memberships     WorkspaceMember[]
   cards           Card[]           @relation("CardAssignee")
-  activity        ActivityLog[]
-  comments        Comment[]        // <--- ADD THIS LINE HERE
+  comments        Comment[]
+  activityLogs    ActivityLog[]
 }
 
 model Workspace {
@@ -36,44 +33,44 @@ model Workspace {
   owner       User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
   members     WorkspaceMember[]
   boards      Board[]
+  activityLogs ActivityLog[]
 }
 
 model WorkspaceMember {
   id          String    @id @default(uuid())
   workspaceId String
   userId      String
-  role        Role      @default(MEMBER) // ADMIN or MEMBER
+  role        Role      @default(MEMBER)
   joinedAt    DateTime  @default(now())
 
-  // Relationships
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([workspaceId, userId]) // A user can join a workspace only once
+  @@unique([workspaceId, userId])
 }
 
 model Board {
   id          String    @id @default(uuid())
   workspaceId String
   title       String
-  bgImage     String?   // URL for unsplash image or color hex
+  bgImage     String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  // Relationships
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   lists       List[]
-  activity    ActivityLog[]
+  
+  // FIX: Added this line to complete the relation
+  activityLogs ActivityLog[]
 }
 
 model List {
   id        String   @id @default(uuid())
   boardId   String
   title     String
-  order     Float    @default(0) // Logic for drag & drop sorting
+  order     Float    @default(0)
   createdAt DateTime @default(now())
 
-  // Relationships
   board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
   cards     Card[]
 }
@@ -88,21 +85,9 @@ model Card {
   assigneeId  String?
   createdAt   DateTime  @default(now())
 
-  // Relationships
   list      List         @relation(fields: [listId], references: [id], onDelete: Cascade)
   assignee  User?        @relation("CardAssignee", fields: [assigneeId], references: [id])
-  comments  Comment[]    // <--- Ensure this is added from the previous step
-}
-
-model ActivityLog {
-  id        String   @id @default(uuid())
-  boardId   String
-  userId    String
-  action    String   // e.g., "moved card X to Done"
-  createdAt DateTime @default(now())
-
-  board     Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id])
+  comments  Comment[]
 }
 
 model Comment {
@@ -112,9 +97,24 @@ model Comment {
   text      String
   createdAt DateTime @default(now())
 
-  // Relationships
   card      Card     @relation(fields: [cardId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id])
+}
+
+model ActivityLog {
+  id          String   @id @default(uuid())
+  workspaceId String
+  userId      String
+  boardId     String?  // Context field
+  entityType  String
+  entityTitle String
+  action      String
+  createdAt   DateTime @default(now())
+
+  // Relationships
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id])
+  board       Board?    @relation(fields: [boardId], references: [id], onDelete: SetNull)
 }
 
 enum Role {
